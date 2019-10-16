@@ -4,17 +4,10 @@ import pickle
 import numpy as np
 import tensorflow as tf
 
+import config as conf
+
 from data.mnist import Mnist
 from models.vanilla_gan import VanillaGAN
-
-
-NOISE_DEPTH = 20
-
-BATCH_SIZE = 32
-NUM_EPOCHS = 100
-
-MODEL_SAVEL_DIR = "../../learned-models/vanilla-GAN"
-MODEL_NAME = "vanilla-GAN"
 
 
 def feature_normalize(features):
@@ -26,11 +19,11 @@ def feature_denormalize(features):
 
 
 def main():
-    model_ckpt_name = "%s-model.ckpt" % MODEL_NAME
-    model_spec_name = "%s-model-spec.json" % MODEL_NAME
-    model_rslt_name = "%s-results.pickle" % MODEL_NAME
+    model_ckpt_name = "%s-model.ckpt" % conf.MODEL_NAME
+    model_spec_name = "%s-model-spec.json" % conf.MODEL_NAME
+    model_rslt_name = "%s-results.pickle" % conf.MODEL_NAME
 
-    model_save_path = os.path.join(MODEL_SAVEL_DIR, MODEL_NAME)
+    model_save_path = os.path.join(conf.MODEL_SAVE_DIR, conf.MODEL_NAME)
     if not os.path.exists(model_save_path):
         os.makedirs(model_save_path)
     
@@ -44,11 +37,17 @@ def main():
     features = feature_normalize(features)
 
     num_sets = loader.num_train_sets + loader.num_test_sets
+    
     feature_depth = loader.feature_depth
     feature_shape = loader.feature_shape
     
+    latent_depth = conf.LATENT_DEPTH
+
+    batch_size = conf.BATCH_SIZE
+    num_epochs = conf.NUM_EPOCHS
+    
     x = tf.placeholder(dtype=tf.float32, shape=[None, feature_depth])
-    z = tf.placeholder(dtype=tf.float32, shape=[None, NOISE_DEPTH])
+    z = tf.placeholder(dtype=tf.float32, shape=[None, latent_depth])
 
     gan = VanillaGAN(x, z, feature_depth)
 
@@ -61,45 +60,37 @@ def main():
 
     saver = tf.train.Saver(max_to_keep=1000)
 
-    steps_per_epoch = num_sets // BATCH_SIZE
-    train_steps = steps_per_epoch * NUM_EPOCHS
+    steps_per_epoch = num_sets // batch_size
+    train_steps = steps_per_epoch * num_epochs
 
     train_losses_g = []
     train_losses_d = []
     train_losses_epoch_g = []
     train_losses_epoch_d = []
     gs = []
-    for i in range(train_steps):
+    for i in range(1, train_steps+1):
         epoch = i // steps_per_epoch
 
-        idxes = np.random.choice(num_sets, BATCH_SIZE, replace=False)
+        idxes = np.random.choice(num_sets, batch_size, replace=False)
         features_i = features[idxes]
-        z_i = np.random.randn(BATCH_SIZE, NOISE_DEPTH)
+        z_i = np.random.randn(batch_size, latent_depth)
 
-        loss_d_i, _ = sess.run(
-            [loss_d, opt_d], feed_dict={x: features_i, z: z_i}
-        )
-        loss_g_i, _ = sess.run(
-            [loss_g, opt_g], feed_dict={x: features_i, z: z_i}
-        )
+        loss_d_i, _ = sess.run([loss_d, opt_d], feed_dict={x: features_i, z: z_i})
+        loss_g_i, _ = sess.run([loss_g, opt_g], feed_dict={x: features_i, z: z_i})
 
         train_losses_g.append(loss_g_i)
         train_losses_d.append(loss_d_i)
 
         if i % steps_per_epoch == 0:
-            temp_idx = 0
-            g = sess.run(
-                gan.g[temp_idx], feed_dict={z: z_i}
-            )
+            view_range = 10
+            g = sess.run(gan.g[:view_range], feed_dict={z: z_i})
             g = feature_denormalize(g)
 
             train_loss_epoch_g = np.mean(train_losses_g[-steps_per_epoch:])
             train_loss_epoch_d = np.mean(train_losses_d[-steps_per_epoch:])
 
-            print(
-                "Epoch: %i,  Training G Loss: %f,  Training D Loss: %f" % (
-                    epoch, train_loss_epoch_g, train_loss_epoch_d
-                )
+            print("Epoch: %i,  Training G Loss: %f,  Training D Loss: %f" % \
+                (epoch, train_loss_epoch_g, train_loss_epoch_d)
             )
 
             train_losses_epoch_g.append(train_loss_epoch_g)
@@ -110,14 +101,7 @@ def main():
             saver.save(sess, model_ckpt_path, global_step=epoch)
 
             with open(model_rslt_path, "wb") as f:
-                pickle.dump(
-                    (
-                        train_losses_epoch_g,
-                        train_losses_epoch_d,
-                        gs
-                    ),
-                    f
-                )
+                pickle.dump((train_losses_epoch_g, train_losses_epoch_d, gs), f)
 
 
 if __name__ == "__main__":
